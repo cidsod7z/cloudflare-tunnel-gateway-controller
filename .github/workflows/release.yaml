@@ -1,165 +1,150 @@
 name: Release
-
-on:
+'on':
   push:
     tags:
-      - 'v*'
-
+    - v*
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 permissions:
   contents: write
   packages: write
   id-token: write
-
 jobs:
-  # Lint and test Helm chart (runs in parallel with build-and-push)
   lint-chart:
     name: Lint Chart
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
+    - name: Checkout code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        fetch-depth: 0
+    - name: Set up Helm
+      uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2
+      with:
+        version: v3.19.2
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+      with:
+        python-version: 3.14.4
+    - name: Set up chart-testing
+      uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f
+    - name: Install tools
+      run: '# helm-unittest
 
-      - name: Set up Helm
-        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5
-        with:
-          # renovate: datasource=github-releases depName=helm/helm
-          version: 'v3.19.2'
+        helm plugin install https://github.com/helm-unittest/helm-unittest.git
 
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
-        with:
-          python-version: '3.14.4'
 
-      - name: Set up chart-testing
-        uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
+        # JSON schema validator
 
-      - name: Install tools
-        run: |
-          # helm-unittest
-          helm plugin install https://github.com/helm-unittest/helm-unittest.git
+        pip install check-jsonschema
 
-          # JSON schema validator
-          pip install check-jsonschema
 
-          # Artifact Hub CLI
-          # renovate: datasource=github-releases depName=artifacthub/hub
-          AH_VERSION="1.22.0"
-          AH_SHA256="c845307d19f822905b7c47b3f216712116dd74709802c7d1d4a9b6f999d6f92a"
-          wget --quiet "https://github.com/artifacthub/hub/releases/download/v${AH_VERSION}/ah_${AH_VERSION}_linux_amd64.tar.gz"
-          echo "${AH_SHA256}  ah_${AH_VERSION}_linux_amd64.tar.gz" | sha256sum --check --strict
-          tar --extract --gzip --file "ah_${AH_VERSION}_linux_amd64.tar.gz"
-          chmod +x ah
-          sudo mv ah /usr/local/bin/ah
+        # Artifact Hub CLI
 
-          # helm-docs
-          # renovate: datasource=github-releases depName=norwoodj/helm-docs
-          HELM_DOCS_VERSION="1.14.2"
-          HELM_DOCS_SHA256="a8cf72ada34fad93285ba2a452b38bdc5bd52cc9a571236244ec31022928d6cc"
-          wget --quiet "https://github.com/norwoodj/helm-docs/releases/download/v${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz"
-          echo "${HELM_DOCS_SHA256}  helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz" | sha256sum --check --strict
-          tar --extract --gzip --file "helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz"
-          chmod +x helm-docs
-          sudo mv helm-docs /usr/local/bin/helm-docs
+        # renovate: datasource=github-releases depName=artifacthub/hub
 
-      - name: Run Helm Lint
-        run: |
-          echo "Running Helm lint..."
-          helm lint charts/cloudflare-tunnel-gateway-controller
+        AH_VERSION="1.22.0"
 
-      - name: Run Helm Unittest
-        run: |
-          CHART_DIR="charts/cloudflare-tunnel-gateway-controller"
-          if [ -d "$CHART_DIR/tests" ]; then
-            echo "Running unit tests..."
-            helm unittest "$CHART_DIR" --color --with-subchart=false
-          else
-            echo "No tests directory found, skipping unit tests"
-          fi
+        AH_SHA256="c845307d19f822905b7c47b3f216712116dd74709802c7d1d4a9b6f999d6f92a"
 
-      - name: Run chart-testing (lint)
-        run: |
-          echo "Running chart-testing lint..."
-          ct lint --charts charts/cloudflare-tunnel-gateway-controller
+        wget --quiet "https://github.com/artifacthub/hub/releases/download/v${AH_VERSION}/ah_${AH_VERSION}_linux_amd64.tar.gz"
 
-      - name: Run Artifact Hub Lint
-        run: |
-          echo "Running Artifact Hub lint..."
-          ah lint --kind helm --path charts/cloudflare-tunnel-gateway-controller
+        echo "${AH_SHA256}  ah_${AH_VERSION}_linux_amd64.tar.gz" | sha256sum --check
+        --strict
 
-      - name: Validate JSON Schema
-        run: |
-          CHART_DIR="charts/cloudflare-tunnel-gateway-controller"
-          if [ -f "$CHART_DIR/values.schema.json" ]; then
-            echo "Validating values.yaml against schema..."
-            check-jsonschema --schemafile "$CHART_DIR/values.schema.json" "$CHART_DIR/values.yaml"
-          else
-            echo "No values.schema.json found, skipping schema validation"
-          fi
+        tar --extract --gzip --file "ah_${AH_VERSION}_linux_amd64.tar.gz"
 
-      - name: Template Chart
-        run: |
-          echo "Testing chart templating with default values..."
-          helm template test-release charts/cloudflare-tunnel-gateway-controller
+        chmod +x ah
 
-      - name: Template Chart with GatewayClassConfig
-        run: |
-          echo "Testing chart with GatewayClassConfig enabled..."
-          helm template test-release charts/cloudflare-tunnel-gateway-controller \
-            --set gatewayClassConfig.create=true \
-            --set gatewayClassConfig.tunnelID=550e8400-e29b-41d4-a716-446655440000 \
-            --set gatewayClassConfig.cloudflareCredentialsSecretRef.name=cloudflare-credentials
+        sudo mv ah /usr/local/bin/ah
 
-      - name: Template Chart with cloudflared management
-        run: |
-          echo "Testing chart with cloudflared management enabled..."
-          helm template test-release charts/cloudflare-tunnel-gateway-controller \
-            --set gatewayClassConfig.create=true \
-            --set gatewayClassConfig.tunnelID=550e8400-e29b-41d4-a716-446655440000 \
-            --set gatewayClassConfig.cloudflareCredentialsSecretRef.name=cloudflare-credentials \
-            --set gatewayClassConfig.tunnelTokenSecretRef.name=cloudflare-tunnel-token \
-            --set gatewayClassConfig.cloudflared.enabled=true
 
-      - name: Template Chart with ServiceMonitor
-        run: |
-          echo "Testing chart with ServiceMonitor enabled..."
-          helm template test-release charts/cloudflare-tunnel-gateway-controller \
-            --set serviceMonitor.enabled=true
+        # helm-docs
 
-      - name: Template Chart with proxy enabled
-        run: |
-          echo "Testing chart with proxy enabled..."
-          helm template test-release charts/cloudflare-tunnel-gateway-controller \
-            --set proxy.enabled=true \
-            --set proxy.tunnelTokenSecretRef.name=tunnel-token-secret
+        # renovate: datasource=github-releases depName=norwoodj/helm-docs
 
-      - name: Validate helm-docs
-        run: |
-          CHART_DIR="charts/cloudflare-tunnel-gateway-controller"
-          echo "Validating README.md is up to date..."
-          helm-docs "$CHART_DIR"
+        HELM_DOCS_VERSION="1.14.2"
 
-          if git diff --exit-code "$CHART_DIR/README.md" > /dev/null 2>&1; then
-            echo "README.md is up to date"
-          else
-            echo "ERROR: README.md is out of date!"
-            echo "Please run: helm-docs $CHART_DIR"
-            echo ""
-            echo "Diff:"
-            git diff "$CHART_DIR/README.md"
-            exit 1
-          fi
+        HELM_DOCS_SHA256="a8cf72ada34fad93285ba2a452b38bdc5bd52cc9a571236244ec31022928d6cc"
 
-      - name: Run Markdownlint
-        uses: DavidAnson/markdownlint-cli2-action@6b51ade7a9e4a75a7ad929842dd298a3804ebe8b # v23
-        with:
-          globs: 'charts/**/*.md'
+        wget --quiet "https://github.com/norwoodj/helm-docs/releases/download/v${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz"
 
+        echo "${HELM_DOCS_SHA256}  helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz"
+        | sha256sum --check --strict
+
+        tar --extract --gzip --file "helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz"
+
+        chmod +x helm-docs
+
+        sudo mv helm-docs /usr/local/bin/helm-docs
+
+        '
+    - name: Run Helm Lint
+      run: 'echo "Running Helm lint..."
+
+        helm lint charts/cloudflare-tunnel-gateway-controller
+
+        '
+    - name: Run Helm Unittest
+      run: "CHART_DIR=\"charts/cloudflare-tunnel-gateway-controller\"\nif [ -d \"\
+        $CHART_DIR/tests\" ]; then\n  echo \"Running unit tests...\"\n  helm unittest\
+        \ \"$CHART_DIR\" --color --with-subchart=false\nelse\n  echo \"No tests directory\
+        \ found, skipping unit tests\"\nfi\n"
+    - name: Run chart-testing (lint)
+      run: 'echo "Running chart-testing lint..."
+
+        ct lint --charts charts/cloudflare-tunnel-gateway-controller
+
+        '
+    - name: Run Artifact Hub Lint
+      run: 'echo "Running Artifact Hub lint..."
+
+        ah lint --kind helm --path charts/cloudflare-tunnel-gateway-controller
+
+        '
+    - name: Validate JSON Schema
+      run: "CHART_DIR=\"charts/cloudflare-tunnel-gateway-controller\"\nif [ -f \"\
+        $CHART_DIR/values.schema.json\" ]; then\n  echo \"Validating values.yaml against\
+        \ schema...\"\n  check-jsonschema --schemafile \"$CHART_DIR/values.schema.json\"\
+        \ \"$CHART_DIR/values.yaml\"\nelse\n  echo \"No values.schema.json found,\
+        \ skipping schema validation\"\nfi\n"
+    - name: Template Chart
+      run: 'echo "Testing chart templating with default values..."
+
+        helm template test-release charts/cloudflare-tunnel-gateway-controller
+
+        '
+    - name: Template Chart with GatewayClassConfig
+      run: "echo \"Testing chart with GatewayClassConfig enabled...\"\nhelm template\
+        \ test-release charts/cloudflare-tunnel-gateway-controller \\\n  --set gatewayClassConfig.create=true\
+        \ \\\n  --set gatewayClassConfig.tunnelID=550e8400-e29b-41d4-a716-446655440000\
+        \ \\\n  --set gatewayClassConfig.cloudflareCredentialsSecretRef.name=cloudflare-credentials\n"
+    - name: Template Chart with cloudflared management
+      run: "echo \"Testing chart with cloudflared management enabled...\"\nhelm template\
+        \ test-release charts/cloudflare-tunnel-gateway-controller \\\n  --set gatewayClassConfig.create=true\
+        \ \\\n  --set gatewayClassConfig.tunnelID=550e8400-e29b-41d4-a716-446655440000\
+        \ \\\n  --set gatewayClassConfig.cloudflareCredentialsSecretRef.name=cloudflare-credentials\
+        \ \\\n  --set gatewayClassConfig.tunnelTokenSecretRef.name=cloudflare-tunnel-token\
+        \ \\\n  --set gatewayClassConfig.cloudflared.enabled=true\n"
+    - name: Template Chart with ServiceMonitor
+      run: "echo \"Testing chart with ServiceMonitor enabled...\"\nhelm template test-release\
+        \ charts/cloudflare-tunnel-gateway-controller \\\n  --set serviceMonitor.enabled=true\n"
+    - name: Template Chart with proxy enabled
+      run: "echo \"Testing chart with proxy enabled...\"\nhelm template test-release\
+        \ charts/cloudflare-tunnel-gateway-controller \\\n  --set proxy.enabled=true\
+        \ \\\n  --set proxy.tunnelTokenSecretRef.name=tunnel-token-secret\n"
+    - name: Validate helm-docs
+      run: "CHART_DIR=\"charts/cloudflare-tunnel-gateway-controller\"\necho \"Validating\
+        \ README.md is up to date...\"\nhelm-docs \"$CHART_DIR\"\n\nif git diff --exit-code\
+        \ \"$CHART_DIR/README.md\" > /dev/null 2>&1; then\n  echo \"README.md is up\
+        \ to date\"\nelse\n  echo \"ERROR: README.md is out of date!\"\n  echo \"\
+        Please run: helm-docs $CHART_DIR\"\n  echo \"\"\n  echo \"Diff:\"\n  git diff\
+        \ \"$CHART_DIR/README.md\"\n  exit 1\nfi\n"
+    - name: Run Markdownlint
+      uses: DavidAnson/markdownlint-cli2-action@6b51ade7a9e4a75a7ad929842dd298a3804ebe8b
+      with:
+        globs: charts/**/*.md
   build-and-push:
     name: Build and Push (${{ matrix.component }})
     runs-on: ${{ matrix.runner }}
@@ -167,96 +152,107 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: linux/amd64
-            runner: ubuntu-24.04
-            component: controller
-            file: Containerfile
-            image_suffix: ""
-          - platform: linux/arm64
-            runner: ubuntu-24.04-arm
-            component: controller
-            file: Containerfile
-            image_suffix: ""
-          - platform: linux/amd64
-            runner: ubuntu-24.04
-            component: proxy
-            file: Containerfile.proxy
-            image_suffix: -proxy
-          - platform: linux/arm64
-            runner: ubuntu-24.04-arm
-            component: proxy
-            file: Containerfile.proxy
-            image_suffix: -proxy
+        - platform: linux/amd64
+          runner: ubuntu-24.04
+          component: controller
+          file: Containerfile
+          image_suffix: ''
+        - platform: linux/arm64
+          runner: ubuntu-latest
+          component: controller
+          file: Containerfile
+          image_suffix: ''
+        - platform: linux/amd64
+          runner: ubuntu-24.04
+          component: proxy
+          file: Containerfile.proxy
+          image_suffix: -proxy
+        - platform: linux/arm64
+          runner: ubuntu-latest
+          component: proxy
+          file: Containerfile.proxy
+          image_suffix: -proxy
     steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
+    - name: Checkout code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        fetch-depth: 0
+    - name: Prepare platform identifier
+      id: platform
+      run: 'platform="${{ matrix.platform }}"
 
-      - name: Prepare platform identifier
-        id: platform
-        run: |
-          platform="${{ matrix.platform }}"
-          echo "pair=${platform//\//-}" >> "$GITHUB_OUTPUT"
+        echo "pair=${platform//\//-}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+        '
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Extract README description
+      id: readme
+      run: 'DESCRIPTION=$(sed -n ''7p'' README.md | sed ''s/\[//'' | sed ''s/\]([^)]*)//g'')
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        echo "description=${DESCRIPTION}" >> "$GITHUB_OUTPUT"
 
-      - name: Extract README description
-        id: readme
-        run: |
-          DESCRIPTION=$(sed -n '7p' README.md | sed 's/\[//' | sed 's/\]([^)]*)//g')
-          echo "description=${DESCRIPTION}" >> "$GITHUB_OUTPUT"
+        '
+    - name: Docker meta
+      id: meta
+      uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf
+      with:
+        images: ghcr.io/${{ github.repository }}${{ matrix.image_suffix }}
+        tags: 'type=semver,pattern={{version}}
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6
-        with:
-          images: ghcr.io/${{ github.repository }}${{ matrix.image_suffix }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
-          labels: |
-            org.opencontainers.image.description=${{ steps.readme.outputs.description }}
+          type=semver,pattern={{major}}.{{minor}}
 
-      - name: Build and Push by Digest
-        id: build
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
-        with:
-          context: .
-          file: ./${{ matrix.file }}
-          platforms: ${{ matrix.platform }}
-          outputs: type=image,name=ghcr.io/${{ github.repository }}${{ matrix.image_suffix }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=build-${{ matrix.component }}-${{ steps.platform.outputs.pair }}
-          cache-to: type=gha,scope=build-${{ matrix.component }}-${{ steps.platform.outputs.pair }},mode=max
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
-            REVISION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
+          type=semver,pattern={{major}}
 
-      - name: Export digest
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          type=raw,value=latest
 
-      - name: Upload digest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: digests-${{ matrix.component }}-${{ steps.platform.outputs.pair }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
+          '
+        labels: 'org.opencontainers.image.description=${{ steps.readme.outputs.description
+          }}
 
+          '
+    - name: Build and Push by Digest
+      id: build
+      uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f
+      with:
+        context: .
+        file: ./${{ matrix.file }}
+        platforms: ${{ matrix.platform }}
+        outputs: type=image,name=ghcr.io/${{ github.repository }}${{ matrix.image_suffix
+          }},push-by-digest=true,name-canonical=true,push=true
+        cache-from: type=gha,scope=build-${{ matrix.component }}-${{ steps.platform.outputs.pair
+          }}
+        cache-to: type=gha,scope=build-${{ matrix.component }}-${{ steps.platform.outputs.pair
+          }},mode=max
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: 'VERSION=${{ fromJSON(steps.meta.outputs.json).labels[''org.opencontainers.image.version'']
+          }}
+
+          REVISION=${{ fromJSON(steps.meta.outputs.json).labels[''org.opencontainers.image.revision'']
+          }}
+
+          '
+    - name: Export digest
+      run: 'mkdir -p /tmp/digests
+
+        digest="${{ steps.build.outputs.digest }}"
+
+        touch "/tmp/digests/${digest#sha256:}"
+
+        '
+    - name: Upload digest
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: digests-${{ matrix.component }}-${{ steps.platform.outputs.pair }}
+        path: /tmp/digests/*
+        if-no-files-found: error
+        retention-days: 1
   merge-manifests:
     name: Merge Manifests (${{ matrix.component }})
     runs-on: ubuntu-latest
@@ -266,447 +262,309 @@ jobs:
     strategy:
       matrix:
         include:
-          - component: controller
-            image_suffix: ""
-          - component: proxy
-            image_suffix: -proxy
+        - component: controller
+          image_suffix: ''
+        - component: proxy
+          image_suffix: -proxy
     steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+    - name: Checkout code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+    - name: Extract version
+      id: version
+      run: 'VERSION="${GITHUB_REF_NAME#v}"
 
-      - name: Extract version
-        id: version
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Version: ${VERSION}"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Download digests
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: digests-${{ matrix.component }}-*
-          path: /tmp/digests
-          merge-multiple: true
+        echo "Version: ${VERSION}"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+        '
+    - name: Download digests
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        pattern: digests-${{ matrix.component }}-*
+        path: /tmp/digests
+        merge-multiple: true
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Extract README description
+      id: readme
+      run: 'DESCRIPTION=$(sed -n ''7p'' README.md | sed ''s/\[//'' | sed ''s/\]([^)]*)//g'')
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        echo "description=${DESCRIPTION}" >> "$GITHUB_OUTPUT"
 
-      - name: Extract README description
-        id: readme
-        run: |
-          DESCRIPTION=$(sed -n '7p' README.md | sed 's/\[//' | sed 's/\]([^)]*)//g')
-          echo "description=${DESCRIPTION}" >> "$GITHUB_OUTPUT"
+        '
+    - name: Docker meta
+      id: meta
+      uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf
+      with:
+        images: ghcr.io/${{ github.repository }}${{ matrix.image_suffix }}
+        tags: 'type=semver,pattern={{version}}
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6
-        with:
-          images: ghcr.io/${{ github.repository }}${{ matrix.image_suffix }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
-          labels: |
-            org.opencontainers.image.description=${{ steps.readme.outputs.description }}
+          type=semver,pattern={{major}}.{{minor}}
 
-      - name: Create manifest list and push
-        working-directory: /tmp/digests
-        run: |
-          set -euo pipefail
+          type=semver,pattern={{major}}
 
-          # Build tag arguments array (-t and tag as separate elements)
-          mapfile -t tag_args < <(jq -r '.tags[] | "-t", .' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          type=raw,value=latest
 
-          # Build image references array
-          images=()
-          for digest_file in *; do
-            [[ -f "$digest_file" ]] || continue
-            images+=("ghcr.io/${{ github.repository }}${{ matrix.image_suffix }}@sha256:${digest_file}")
-          done
+          '
+        labels: 'org.opencontainers.image.description=${{ steps.readme.outputs.description
+          }}
 
-          # Create multi-arch manifest
-          docker buildx imagetools create "${tag_args[@]}" "${images[@]}"
+          '
+    - name: Create manifest list and push
+      working-directory: /tmp/digests
+      run: "set -euo pipefail\n\n# Build tag arguments array (-t and tag as separate\
+        \ elements)\nmapfile -t tag_args < <(jq -r '.tags[] | \"-t\", .' <<< \"$DOCKER_METADATA_OUTPUT_JSON\"\
+        )\n\n# Build image references array\nimages=()\nfor digest_file in *; do\n\
+        \  [[ -f \"$digest_file\" ]] || continue\n  images+=(\"ghcr.io/${{ github.repository\
+        \ }}${{ matrix.image_suffix }}@sha256:${digest_file}\")\ndone\n\n# Create\
+        \ multi-arch manifest\ndocker buildx imagetools create \"${tag_args[@]}\"\
+        \ \"${images[@]}\"\n"
+    - name: Inspect image
+      run: 'docker buildx imagetools inspect ${{ fromJSON(steps.meta.outputs.json).tags[0]
+        }}
 
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
-
-      - name: Sign container images
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-        run: |
-          # Sign all tags created by metadata-action
-          mapfile -t tags < <(echo "$DOCKER_METADATA_OUTPUT_TAGS" | tr '\n' ' ' | xargs -n1)
-          for tag in "${tags[@]}"; do
-            echo "Signing ${tag}"
-            cosign sign --yes "${tag}"
-          done
-
-      - name: Generate container summary
-        run: |
-          IMAGE_TAG="${{ fromJSON(steps.meta.outputs.json).tags[0] }}"
-          MANIFEST_DIGEST=$(docker buildx imagetools inspect "${IMAGE_TAG}" --format '{{.Manifest.Digest}}')
-
-          {
-            echo "## Container Image (${{ matrix.component }})"
-            echo ""
-            echo "### Image Tags"
-            echo "\`\`\`"
-            echo "$DOCKER_METADATA_OUTPUT_TAGS"
-            echo "\`\`\`"
-            echo ""
-            echo "### Platforms"
-            docker buildx imagetools inspect "${IMAGE_TAG}" --format '{{range .Manifest.Manifests}}- {{.Platform.OS}}/{{.Platform.Architecture}}{{if .Platform.Variant}}/{{.Platform.Variant}}{{end}}{{"\n"}}{{end}}'
-            echo ""
-            echo "### Manifest Digest"
-            echo "\`${MANIFEST_DIGEST}\`"
-            echo ""
-            echo "### Signature"
-            echo "Image is signed with cosign using keyless signing (Sigstore)"
-            echo ""
-            echo "**Verify signature:**"
-            echo "\`\`\`bash"
-            echo "cosign verify ${IMAGE_TAG} --certificate-identity-regexp=https://github.com/${{ github.repository }} --certificate-oidc-issuer=https://token.actions.githubusercontent.com"
-            echo "\`\`\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
+        '
+    - name: Install cosign
+      uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003
+    - name: Sign container images
+      env:
+        COSIGN_EXPERIMENTAL: '1'
+      run: "# Sign all tags created by metadata-action\nmapfile -t tags < <(echo \"\
+        $DOCKER_METADATA_OUTPUT_TAGS\" | tr '\\n' ' ' | xargs -n1)\nfor tag in \"\
+        ${tags[@]}\"; do\n  echo \"Signing ${tag}\"\n  cosign sign --yes \"${tag}\"\
+        \ndone\n"
+    - name: Generate container summary
+      run: "IMAGE_TAG=\"${{ fromJSON(steps.meta.outputs.json).tags[0] }}\"\nMANIFEST_DIGEST=$(docker\
+        \ buildx imagetools inspect \"${IMAGE_TAG}\" --format '{{.Manifest.Digest}}')\n\
+        \n{\n  echo \"## Container Image (${{ matrix.component }})\"\n  echo \"\"\n\
+        \  echo \"### Image Tags\"\n  echo \"\\`\\`\\`\"\n  echo \"$DOCKER_METADATA_OUTPUT_TAGS\"\
+        \n  echo \"\\`\\`\\`\"\n  echo \"\"\n  echo \"### Platforms\"\n  docker buildx\
+        \ imagetools inspect \"${IMAGE_TAG}\" --format '{{range .Manifest.Manifests}}-\
+        \ {{.Platform.OS}}/{{.Platform.Architecture}}{{if .Platform.Variant}}/{{.Platform.Variant}}{{end}}{{\"\
+        \\n\"}}{{end}}'\n  echo \"\"\n  echo \"### Manifest Digest\"\n  echo \"\\\
+        `${MANIFEST_DIGEST}\\`\"\n  echo \"\"\n  echo \"### Signature\"\n  echo \"\
+        Image is signed with cosign using keyless signing (Sigstore)\"\n  echo \"\"\
+        \n  echo \"**Verify signature:**\"\n  echo \"\\`\\`\\`bash\"\n  echo \"cosign\
+        \ verify ${IMAGE_TAG} --certificate-identity-regexp=https://github.com/${{\
+        \ github.repository }} --certificate-oidc-issuer=https://token.actions.githubusercontent.com\"\
+        \n  echo \"\\`\\`\\`\"\n} >> \"$GITHUB_STEP_SUMMARY\"\n"
   publish-chart:
     name: Publish Helm Chart
     runs-on: ubuntu-latest
-    needs: [build-and-push, lint-chart]
+    needs:
+    - build-and-push
+    - lint-chart
     outputs:
       version: ${{ steps.version.outputs.version }}
     env:
-      # Chart name must match name in Chart.yaml for OCI compatibility
       CHART_NAME: cloudflare-tunnel-gateway-controller
-      # OCI registry path - artifact name (last component) MUST match CHART_NAME
       CHART_OCI_REPO: ghcr.io/${{ github.repository_owner }}/charts/cloudflare-tunnel-gateway-controller
     steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
+    - name: Checkout code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        fetch-depth: 0
+    - name: Extract version
+      id: version
+      run: 'VERSION="${GITHUB_REF_NAME#v}"
 
-      - name: Extract version
-        id: version
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Version: ${VERSION}"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Install Helm
-        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5
-        with:
-          version: latest
+        echo "Version: ${VERSION}"
 
-      - name: Install oras
-        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2
+        '
+    - name: Install Helm
+      uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2
+      with:
+        version: latest
+    - name: Install oras
+      uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3
+    - name: Install cosign
+      uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003
+    - name: Install yq
+      run: '# renovate: datasource=github-releases depName=mikefarah/yq
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+        YQ_VERSION="4.53.2"
 
-      - name: Install yq
-        run: |
-          # renovate: datasource=github-releases depName=mikefarah/yq
-          YQ_VERSION="4.53.2"
-          YQ_SHA256="a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7"
-          wget --quiet "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" --output-document yq
-          echo "${YQ_SHA256}  yq" | sha256sum --check --strict
-          chmod +x yq
-          sudo mv yq /usr/local/bin/yq
+        YQ_SHA256="a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7"
 
-      - name: Generate changelog from commits
-        id: changelog
-        run: |
-          # Get previous tag (find tag before current one)
-          CURRENT_TAG="${GITHUB_REF_NAME}"
-          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -1)
+        wget --quiet "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+        --output-document yq
 
-          # Get commits since previous tag (or all if first release)
-          if [ -n "$PREV_TAG" ]; then
-            COMMITS=$(git log "${PREV_TAG}..HEAD" --format="%s" --no-merges)
-          else
-            COMMITS=$(git log --format="%s" --no-merges)
-          fi
+        echo "${YQ_SHA256}  yq" | sha256sum --check --strict
 
-          # Build changelog using yq for safe YAML generation
-          CHANGELOG_FILE=$(mktemp)
-          echo "[]" > "$CHANGELOG_FILE"
+        chmod +x yq
 
-          while IFS= read -r commit; do
-            # Skip empty lines
-            [ -z "$commit" ] && continue
+        sudo mv yq /usr/local/bin/yq
 
-            # Parse: type(scope): description OR type: description
-            if [[ "$commit" =~ ^(feat|fix|security|refactor|docs|perf|build)(\([^\)]+\))?:\ (.+)$ ]]; then
-              TYPE="${BASH_REMATCH[1]}"
-              SCOPE="${BASH_REMATCH[2]}"
-              DESC="${BASH_REMATCH[3]}"
+        '
+    - name: Generate changelog from commits
+      id: changelog
+      run: "# Get previous tag (find tag before current one)\nCURRENT_TAG=\"${GITHUB_REF_NAME}\"\
+        \nPREV_TAG=$(git tag --sort=-v:refname | grep -v \"^${CURRENT_TAG}$\" | head\
+        \ -1)\n\n# Get commits since previous tag (or all if first release)\nif [\
+        \ -n \"$PREV_TAG\" ]; then\n  COMMITS=$(git log \"${PREV_TAG}..HEAD\" --format=\"\
+        %s\" --no-merges)\nelse\n  COMMITS=$(git log --format=\"%s\" --no-merges)\n\
+        fi\n\n# Build changelog using yq for safe YAML generation\nCHANGELOG_FILE=$(mktemp)\n\
+        echo \"[]\" > \"$CHANGELOG_FILE\"\n\nwhile IFS= read -r commit; do\n  # Skip\
+        \ empty lines\n  [ -z \"$commit\" ] && continue\n\n  # Parse: type(scope):\
+        \ description OR type: description\n  if [[ \"$commit\" =~ ^(feat|fix|security|refactor|docs|perf|build)(\\\
+        ([^\\)]+\\))?:\\ (.+)$ ]]; then\n    TYPE=\"${BASH_REMATCH[1]}\"\n    SCOPE=\"\
+        ${BASH_REMATCH[2]}\"\n    DESC=\"${BASH_REMATCH[3]}\"\n\n    # Remove parentheses\
+        \ from scope\n    SCOPE=\"${SCOPE#\\(}\"\n    SCOPE=\"${SCOPE%\\)}\"\n\n \
+        \   # Map type to Artifact Hub kind\n    case \"$TYPE\" in\n      feat) KIND=\"\
+        added\" ;;\n      fix) KIND=\"fixed\" ;;\n      security) KIND=\"security\"\
+        \ ;;\n      *) KIND=\"changed\" ;;\n    esac\n\n    # Format description with\
+        \ scope\n    if [ -n \"$SCOPE\" ]; then\n      FULL_DESC=\"${SCOPE}: ${DESC}\"\
+        \n    else\n      FULL_DESC=\"${DESC}\"\n    fi\n\n    # Use yq with strenv()\
+        \ to safely add entry (handles all special characters)\n    export KIND FULL_DESC\n\
+        \    yq eval '. += [{\"kind\": strenv(KIND), \"description\": strenv(FULL_DESC)}]'\
+        \ \\\n      --inplace \"$CHANGELOG_FILE\"\n  fi\ndone <<< \"$COMMITS\"\n\n\
+        # Check if changelog is empty (only chore/ci/test commits)\nif [ \"$(cat \"\
+        $CHANGELOG_FILE\")\" = \"[]\" ]; then\n  echo \"No user-facing changes found,\
+        \ skipping changelog annotation\"\n  rm \"$CHANGELOG_FILE\"\n  echo \"yaml=\"\
+        \ >> \"$GITHUB_OUTPUT\"\nelse\n  CHANGELOG_YAML=$(cat \"$CHANGELOG_FILE\"\
+        )\n  rm \"$CHANGELOG_FILE\"\n  {\n    echo \"yaml<<EOF\"\n    echo \"$CHANGELOG_YAML\"\
+        \n    echo \"EOF\"\n  } >> \"$GITHUB_OUTPUT\"\nfi\n"
+    - name: Update Chart version and changelog
+      env:
+        CHANGELOG_YAML: ${{ steps.changelog.outputs.yaml }}
+      run: "VERSION=\"${{ steps.version.outputs.version }}\"\nCHART_PATH=\"charts/cloudflare-tunnel-gateway-controller\"\
+        \n\necho \"Updating Chart.yaml to version ${VERSION}\"\nyq eval \".version\
+        \ = \\\"${VERSION}\\\"\" --inplace \"${CHART_PATH}/Chart.yaml\"\nyq eval \"\
+        .appVersion = \\\"${VERSION}\\\"\" --inplace \"${CHART_PATH}/Chart.yaml\"\n\
+        \n# Add changelog annotation if available\nif [ -n \"$CHANGELOG_YAML\" ];\
+        \ then\n  echo \"Adding changelog annotation...\"\n  yq eval \".annotations.\\\
+        \"artifacthub.io/changes\\\" = strenv(CHANGELOG_YAML)\" --inplace \"${CHART_PATH}/Chart.yaml\"\
+        \nfi\n\necho \"Updated Chart.yaml:\"\ncat \"${CHART_PATH}/Chart.yaml\"\n"
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Package and push chart
+      run: "VERSION=\"${{ steps.version.outputs.version }}\"\nCHART_PATH=\"charts/${CHART_NAME}\"\
+        \n\n# Package chart\nhelm package \"${CHART_PATH}\"\nCHART_FILE=\"${CHART_NAME}-${VERSION}.tgz\"\
+        \n\n# Extract Chart.yaml and convert to JSON for config layer\n# Helm OCI\
+        \ spec requires JSON config blob (helm does json.Marshal(metadata))\n# See:\
+        \ https://github.com/helm/helm/blob/main/pkg/registry/client.go\ntar --extract\
+        \ --gzip --file \"${CHART_FILE}\" \"${CHART_NAME}/Chart.yaml\"\nyq eval --output-format=json\
+        \ \"${CHART_NAME}/Chart.yaml\" > \"${CHART_NAME}/config.json\"\n\n# Push chart\
+        \ using oras for full path control\n# Media types per Helm OCI spec: https://helm.sh/docs/topics/registries/\n\
+        oras push \"${CHART_OCI_REPO}:${VERSION}\" \\\n  --config \"${CHART_NAME}/config.json:application/vnd.cncf.helm.config.v1+json\"\
+        \ \\\n  \"${CHART_FILE}:application/vnd.cncf.helm.chart.content.v1.tar+gzip\"\
+        \n\nrm --recursive --force \"${CHART_NAME}\"\n\necho \"Chart pushed: oci://${CHART_OCI_REPO}:${VERSION}\"\
+        \n\n# Add additional semver tags (matching container image pattern)\nMAJOR_MINOR=$(echo\
+        \ \"${VERSION}\" | cut --delimiter=. --fields=1,2)\nMAJOR=$(echo \"${VERSION}\"\
+        \ | cut --delimiter=. --fields=1)\n\noras tag \"${CHART_OCI_REPO}:${VERSION}\"\
+        \ \\\n  \"${MAJOR_MINOR}\" \\\n  \"${MAJOR}\" \\\n  \"latest\"\n\necho \"\
+        Additional tags created: ${MAJOR_MINOR}, ${MAJOR}, latest\"\n"
+    - name: Push Artifact Hub metadata
+      run: "CHART_PATH=\"charts/${CHART_NAME}\"\n\n# Push artifacthub-repo.yml with\
+        \ special tag for verification\n# See: https://artifacthub.io/docs/topics/repositories/helm-charts/#oci-support\n\
+        oras push \"${CHART_OCI_REPO}:artifacthub.io\" \\\n  --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml\
+        \ \\\n  \"${CHART_PATH}/artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml\"\
+        \n\necho \"Artifact Hub metadata pushed to: ${CHART_OCI_REPO}:artifacthub.io\"\
+        \n"
+    - name: Sign Helm chart with cosign
+      env:
+        COSIGN_EXPERIMENTAL: '1'
+      run: 'VERSION="${{ steps.version.outputs.version }}"
 
-              # Remove parentheses from scope
-              SCOPE="${SCOPE#\(}"
-              SCOPE="${SCOPE%\)}"
 
-              # Map type to Artifact Hub kind
-              case "$TYPE" in
-                feat) KIND="added" ;;
-                fix) KIND="fixed" ;;
-                security) KIND="security" ;;
-                *) KIND="changed" ;;
-              esac
+        # Get chart digest for signing
 
-              # Format description with scope
-              if [ -n "$SCOPE" ]; then
-                FULL_DESC="${SCOPE}: ${DESC}"
-              else
-                FULL_DESC="${DESC}"
-              fi
+        CHART_DIGEST=$(oras manifest fetch "${CHART_OCI_REPO}:${VERSION}" --descriptor
+        | jq --raw-output ''.digest'')
 
-              # Use yq with strenv() to safely add entry (handles all special characters)
-              export KIND FULL_DESC
-              yq eval '. += [{"kind": strenv(KIND), "description": strenv(FULL_DESC)}]' \
-                --inplace "$CHANGELOG_FILE"
-            fi
-          done <<< "$COMMITS"
 
-          # Check if changelog is empty (only chore/ci/test commits)
-          if [ "$(cat "$CHANGELOG_FILE")" = "[]" ]; then
-            echo "No user-facing changes found, skipping changelog annotation"
-            rm "$CHANGELOG_FILE"
-            echo "yaml=" >> "$GITHUB_OUTPUT"
-          else
-            CHANGELOG_YAML=$(cat "$CHANGELOG_FILE")
-            rm "$CHANGELOG_FILE"
-            {
-              echo "yaml<<EOF"
-              echo "$CHANGELOG_YAML"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
-          fi
+        # Sign the chart by digest (immutable reference)
 
-      - name: Update Chart version and changelog
-        env:
-          CHANGELOG_YAML: ${{ steps.changelog.outputs.yaml }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          CHART_PATH="charts/cloudflare-tunnel-gateway-controller"
+        echo "Signing ${CHART_OCI_REPO}@${CHART_DIGEST}"
 
-          echo "Updating Chart.yaml to version ${VERSION}"
-          yq eval ".version = \"${VERSION}\"" --inplace "${CHART_PATH}/Chart.yaml"
-          yq eval ".appVersion = \"${VERSION}\"" --inplace "${CHART_PATH}/Chart.yaml"
+        cosign sign --yes "${CHART_OCI_REPO}@${CHART_DIGEST}"
 
-          # Add changelog annotation if available
-          if [ -n "$CHANGELOG_YAML" ]; then
-            echo "Adding changelog annotation..."
-            yq eval ".annotations.\"artifacthub.io/changes\" = strenv(CHANGELOG_YAML)" --inplace "${CHART_PATH}/Chart.yaml"
-          fi
 
-          echo "Updated Chart.yaml:"
-          cat "${CHART_PATH}/Chart.yaml"
+        echo "Chart signed: ${CHART_OCI_REPO}@${CHART_DIGEST}"
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Package and push chart
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          CHART_PATH="charts/${CHART_NAME}"
-
-          # Package chart
-          helm package "${CHART_PATH}"
-          CHART_FILE="${CHART_NAME}-${VERSION}.tgz"
-
-          # Extract Chart.yaml and convert to JSON for config layer
-          # Helm OCI spec requires JSON config blob (helm does json.Marshal(metadata))
-          # See: https://github.com/helm/helm/blob/main/pkg/registry/client.go
-          tar --extract --gzip --file "${CHART_FILE}" "${CHART_NAME}/Chart.yaml"
-          yq eval --output-format=json "${CHART_NAME}/Chart.yaml" > "${CHART_NAME}/config.json"
-
-          # Push chart using oras for full path control
-          # Media types per Helm OCI spec: https://helm.sh/docs/topics/registries/
-          oras push "${CHART_OCI_REPO}:${VERSION}" \
-            --config "${CHART_NAME}/config.json:application/vnd.cncf.helm.config.v1+json" \
-            "${CHART_FILE}:application/vnd.cncf.helm.chart.content.v1.tar+gzip"
-
-          rm --recursive --force "${CHART_NAME}"
-
-          echo "Chart pushed: oci://${CHART_OCI_REPO}:${VERSION}"
-
-          # Add additional semver tags (matching container image pattern)
-          MAJOR_MINOR=$(echo "${VERSION}" | cut --delimiter=. --fields=1,2)
-          MAJOR=$(echo "${VERSION}" | cut --delimiter=. --fields=1)
-
-          oras tag "${CHART_OCI_REPO}:${VERSION}" \
-            "${MAJOR_MINOR}" \
-            "${MAJOR}" \
-            "latest"
-
-          echo "Additional tags created: ${MAJOR_MINOR}, ${MAJOR}, latest"
-
-      - name: Push Artifact Hub metadata
-        run: |
-          CHART_PATH="charts/${CHART_NAME}"
-
-          # Push artifacthub-repo.yml with special tag for verification
-          # See: https://artifacthub.io/docs/topics/repositories/helm-charts/#oci-support
-          oras push "${CHART_OCI_REPO}:artifacthub.io" \
-            --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
-            "${CHART_PATH}/artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml"
-
-          echo "Artifact Hub metadata pushed to: ${CHART_OCI_REPO}:artifacthub.io"
-
-      - name: Sign Helm chart with cosign
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-
-          # Get chart digest for signing
-          CHART_DIGEST=$(oras manifest fetch "${CHART_OCI_REPO}:${VERSION}" --descriptor | jq --raw-output '.digest')
-
-          # Sign the chart by digest (immutable reference)
-          echo "Signing ${CHART_OCI_REPO}@${CHART_DIGEST}"
-          cosign sign --yes "${CHART_OCI_REPO}@${CHART_DIGEST}"
-
-          echo "Chart signed: ${CHART_OCI_REPO}@${CHART_DIGEST}"
-
-      - name: Generate chart summary
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          MAJOR_MINOR=$(echo "${VERSION}" | cut --delimiter=. --fields=1,2)
-          MAJOR=$(echo "${VERSION}" | cut --delimiter=. --fields=1)
-
-          {
-            echo "## Helm Chart"
-            echo ""
-            echo "**Available tags**: \`${VERSION}\`, \`${MAJOR_MINOR}\`, \`${MAJOR}\`, \`latest\`"
-            echo ""
-            echo "### Installation"
-            echo "\`\`\`bash"
-            echo "helm install ${CHART_NAME} \\"
-            echo "  oci://${CHART_OCI_REPO} \\"
-            echo "  --version ${VERSION}"
-            echo "\`\`\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload chart artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: helm-chart
-          path: "*.tgz"
-          retention-days: 5
-
+        '
+    - name: Generate chart summary
+      run: "VERSION=\"${{ steps.version.outputs.version }}\"\nMAJOR_MINOR=$(echo \"\
+        ${VERSION}\" | cut --delimiter=. --fields=1,2)\nMAJOR=$(echo \"${VERSION}\"\
+        \ | cut --delimiter=. --fields=1)\n\n{\n  echo \"## Helm Chart\"\n  echo \"\
+        \"\n  echo \"**Available tags**: \\`${VERSION}\\`, \\`${MAJOR_MINOR}\\`, \\\
+        `${MAJOR}\\`, \\`latest\\`\"\n  echo \"\"\n  echo \"### Installation\"\n \
+        \ echo \"\\`\\`\\`bash\"\n  echo \"helm install ${CHART_NAME} \\\\\"\n  echo\
+        \ \"  oci://${CHART_OCI_REPO} \\\\\"\n  echo \"  --version ${VERSION}\"\n\
+        \  echo \"\\`\\`\\`\"\n} >> \"$GITHUB_STEP_SUMMARY\"\n"
+    - name: Upload chart artifact
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: helm-chart
+        path: '*.tgz'
+        retention-days: 5
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [merge-manifests, publish-chart]
+    needs:
+    - merge-manifests
+    - publish-chart
     env:
       CHART_NAME: cloudflare-tunnel-gateway-controller
       CHART_OCI_REPO: ghcr.io/${{ github.repository_owner }}/charts/cloudflare-tunnel-gateway-controller
     steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
+    - name: Checkout code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        fetch-depth: 0
+    - name: Generate release notes
+      run: "VERSION=\"${GITHUB_REF_NAME#v}\"\n\n# Get previous tag (find tag before\
+        \ current one)\nCURRENT_TAG=\"${GITHUB_REF_NAME}\"\nPREV_TAG=$(git tag --sort=-v:refname\
+        \ | grep -v \"^${CURRENT_TAG}$\" | head -1)\n\n# Get commits since previous\
+        \ tag\nif [ -n \"$PREV_TAG\" ]; then\n  COMMITS=$(git log \"${PREV_TAG}..HEAD\"\
+        \ --format=\"%s\" --no-merges)\nelse\n  COMMITS=$(git log --format=\"%s\"\
+        \ --no-merges)\nfi\n\n# Build changelog with emojis\nCHANGELOG_SECTION=\"\"\
+        \nwhile IFS= read -r commit; do\n  [ -z \"$commit\" ] && continue\n\n  if\
+        \ [[ \"$commit\" =~ ^(feat|fix|security|refactor|docs|perf|build)(\\([^\\\
+        )]+\\))?:\\ (.+)$ ]]; then\n    TYPE=\"${BASH_REMATCH[1]}\"\n    SCOPE=\"\
+        ${BASH_REMATCH[2]}\"\n    DESC=\"${BASH_REMATCH[3]}\"\n    SCOPE=\"${SCOPE#\\\
+        (}\"; SCOPE=\"${SCOPE%\\)}\"\n\n    case \"$TYPE\" in\n      feat) emoji=\"\
+        \u2728\" ;;\n      fix) emoji=\"\U0001F41B\" ;;\n      security) emoji=\"\U0001F512\
+        \" ;;\n      *) emoji=\"\U0001F504\" ;;\n    esac\n\n    if [ -n \"$SCOPE\"\
+        \ ]; then\n      CHANGELOG_SECTION=\"${CHANGELOG_SECTION}- ${emoji} ${SCOPE}:\
+        \ ${DESC}\"$'\\n'\n    else\n      CHANGELOG_SECTION=\"${CHANGELOG_SECTION}-\
+        \ ${emoji} ${DESC}\"$'\\n'\n    fi\n  fi\ndone <<< \"$COMMITS\"\n\n# Fallback\
+        \ for empty changelog\nif [ -z \"$CHANGELOG_SECTION\" ]; then\n  CHANGELOG_SECTION=\"\
+        No user-facing changes in this release.\"\nfi\n\n# Build release notes\n{\n\
+        \  echo \"## Changelog\"\n  echo \"\"\n  echo \"${CHANGELOG_SECTION}\"\n \
+        \ echo \"## Installation\"\n  echo \"\"\n  echo \"\\`\\`\\`bash\"\n  echo\
+        \ \"helm install ${CHART_NAME} \\\\\"\n  echo \"  oci://${CHART_OCI_REPO}\
+        \ \\\\\"\n  echo \"  --version ${VERSION}\"\n  echo \"\\`\\`\\`\"\n  echo\
+        \ \"\"\n  echo \"## Verification\"\n  echo \"\"\n  echo \"\\`\\`\\`bash\"\n\
+        \  echo \"cosign verify \\\\\"\n  echo \"  ${CHART_OCI_REPO}:${VERSION} \\\
+        \\\"\n  echo \"  --certificate-identity-regexp=https://github.com/${{ github.repository\
+        \ }} \\\\\"\n  echo \"  --certificate-oidc-issuer=https://token.actions.githubusercontent.com\"\
+        \n  echo \"\\`\\`\\`\"\n} > release-notes.md\n\necho \"Generated release notes:\"\
+        \ncat release-notes.md\n"
+    - name: Download chart artifact
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: helm-chart
+        path: ./artifacts
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda
+      with:
+        body_path: release-notes.md
+        draft: false
+        prerelease: false
+        files: './artifacts/*.tgz
 
-      - name: Generate release notes
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-
-          # Get previous tag (find tag before current one)
-          CURRENT_TAG="${GITHUB_REF_NAME}"
-          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -1)
-
-          # Get commits since previous tag
-          if [ -n "$PREV_TAG" ]; then
-            COMMITS=$(git log "${PREV_TAG}..HEAD" --format="%s" --no-merges)
-          else
-            COMMITS=$(git log --format="%s" --no-merges)
-          fi
-
-          # Build changelog with emojis
-          CHANGELOG_SECTION=""
-          while IFS= read -r commit; do
-            [ -z "$commit" ] && continue
-
-            if [[ "$commit" =~ ^(feat|fix|security|refactor|docs|perf|build)(\([^\)]+\))?:\ (.+)$ ]]; then
-              TYPE="${BASH_REMATCH[1]}"
-              SCOPE="${BASH_REMATCH[2]}"
-              DESC="${BASH_REMATCH[3]}"
-              SCOPE="${SCOPE#\(}"; SCOPE="${SCOPE%\)}"
-
-              case "$TYPE" in
-                feat) emoji="✨" ;;
-                fix) emoji="🐛" ;;
-                security) emoji="🔒" ;;
-                *) emoji="🔄" ;;
-              esac
-
-              if [ -n "$SCOPE" ]; then
-                CHANGELOG_SECTION="${CHANGELOG_SECTION}- ${emoji} ${SCOPE}: ${DESC}"$'\n'
-              else
-                CHANGELOG_SECTION="${CHANGELOG_SECTION}- ${emoji} ${DESC}"$'\n'
-              fi
-            fi
-          done <<< "$COMMITS"
-
-          # Fallback for empty changelog
-          if [ -z "$CHANGELOG_SECTION" ]; then
-            CHANGELOG_SECTION="No user-facing changes in this release."
-          fi
-
-          # Build release notes
-          {
-            echo "## Changelog"
-            echo ""
-            echo "${CHANGELOG_SECTION}"
-            echo "## Installation"
-            echo ""
-            echo "\`\`\`bash"
-            echo "helm install ${CHART_NAME} \\"
-            echo "  oci://${CHART_OCI_REPO} \\"
-            echo "  --version ${VERSION}"
-            echo "\`\`\`"
-            echo ""
-            echo "## Verification"
-            echo ""
-            echo "\`\`\`bash"
-            echo "cosign verify \\"
-            echo "  ${CHART_OCI_REPO}:${VERSION} \\"
-            echo "  --certificate-identity-regexp=https://github.com/${{ github.repository }} \\"
-            echo "  --certificate-oidc-issuer=https://token.actions.githubusercontent.com"
-            echo "\`\`\`"
-          } > release-notes.md
-
-          echo "Generated release notes:"
-          cat release-notes.md
-
-      - name: Download chart artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: helm-chart
-          path: ./artifacts
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
-        with:
-          body_path: release-notes.md
-          draft: false
-          prerelease: false
-          files: |
-            ./artifacts/*.tgz
+          '
